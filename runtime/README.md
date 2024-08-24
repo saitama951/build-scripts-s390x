@@ -8,4 +8,4 @@
 * validate `gh auth status`
 * if the corresponding sdk is not present in IBM/dotnet-s390x/releases .automate the whole cross building process on x86 by using qemu.
 * provide a pretty menu to command line args if specific commit or branch is to be built.
-
+* maintain a patch file where intermediate workaround's can be applied through the script (i.e libs.test hangs issue)
