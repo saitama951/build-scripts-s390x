@@ -3,8 +3,16 @@ import subprocess
 import sys
 import json
 import select
+import smtplib
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from email.mime.base import MIMEBase
+from email import encoders
+from datetime import datetime
+
+#Run a shell command (enabled logging facility as well)
+
 def run_command(command, cwd=None):
-    """Run a shell command."""
     result = subprocess.Popen(command, shell=True, cwd=cwd,stdout=subprocess.PIPE, stderr=subprocess.PIPE,text=True)
     poll = select.poll()
     poll.register(result.stdout, select.POLLIN)
@@ -35,8 +43,9 @@ def run_command(command, cwd=None):
         return result.returncode
     return result.returncode
 
+#installation of dependencies, not used as in general (only for references)
+
 def install_dependencies():
-    """Install the necessary dependencies for building the Mono runtime."""
     print("Installing dependencies...")
     dependencies = [
         "sudo apt-get update",
@@ -45,22 +54,19 @@ def install_dependencies():
     for dep in dependencies:
         run_command(dep)
 
+#clone the runtime repository
+
 def clone_repository(repo_url, branch="main"):
-    """Clone the dotnet/runtime repository."""
     target_dir="runtime"
     if not os.path.exists(target_dir):
-        print(f"Cloning repository from {repo_url}...")
+        print(f"xxxxx------Cloning repository from {repo_url} with branch {branch}------xxxxxx")
         run_command(f"git clone --branch {branch} {repo_url}")
     else:
         print(f"Repository already exists at {target_dir}. Skipping clone step.")
 
-def checkout_branch(branch, repo_dir):
-    """Checkout the specified branch."""
-    print(f"Checking out branch {branch}...")
-    run_command(f"git checkout {branch}", cwd=repo_dir)
+#extracts the dotnet version from the global.json
 
 def get_dotnet_version(repo_dir):
-    """Retrieve the .NET version from the global.json file."""
     global_json_path = os.path.join(repo_dir, "global.json")
     
     if not os.path.exists(global_json_path):
@@ -78,53 +84,116 @@ def get_dotnet_version(repo_dir):
         print("Error: Version information not found in global.json")
         return None
 
-def validate_install_dotnet_version():
-    """Get the installed .NET SDK version on the system."""
-    print("Checking installed .NET SDK version...")
-    version_output = run_command("dotnet --version")
-    global_version = get_dotnet_version("runtime")
-    if version_output !=0:
-        #run_command("mkdir dotnet-runtime/.dotnet")
-        download_extract_sdk(global_version)
-        return global_version
-
-    if global_version == version_output:
-        print("The .NET SDK version matched the installed version.")
-    else:
-        print(f"Version mismatch: global.json specifies {global_version}, but {version_output} is installed.")
-        download_extract_sdk(global_version)
-
-    return global_version
+#Attempts to download sdk's from IBM/dotnet-s390x/releases else picks the manual built sdk from saitama951/dotnet-custom-sdk
+#NIT: we need a concrete solution for this.
+#NIT: git-lfs and gh needs to be installed from source for ***RHEL***
 
 def download_extract_sdk(global_version):
-    print("downloading the dotnet-sdk version %s" % global_version)
-    success = run_command("wget https://github.com/IBM/dotnet-s390x/releases/download/v%s/dotnet-sdk-%s-linux-s390x.tar.gz" %(global_version,global_version))
-    if success != 0:
+    run_command("mkdir .dotnet/", cwd="runtime")
+
+    print("xxxxx-----downloading the dotnet-sdk version %s-----xxxxx" % global_version)
+    success1 = run_command("gh release download v%s --repo IBM/dotnet-s390x --pattern \"dotnet-sdk-*.tar.gz\"" %(global_version))
+    run_command("git clone https://github.com/saitama951/dotnet-custom-sdk.git")
+    success2 = os.path.exists("./dotnet-custom-sdk/%s/" %(global_version))
+    print(success2)
+    if success1 != 0 and success2 !=True:
         print("This sdk version is not present in the IBM/dotnet-s390x/releases please build it manually!")
         sys.exit()
-    print("downloading corresponding arch nupkgs")
-    run_command("mkdir packages")
-    run_command("gh release download v%s --repo IBM/dotnet-s390x --pattern \"*linux-s390x*.nupkg\"" %(global_version),cwd="packages")
-    run_command("tar -xzf dotnet-sdk-%s-linux-s390x.tar.gz --directory runtime/.dotnet/" % global_version)
-    run_command(".dotnet/dotnet nuget add source /root/packages", cwd="runtime")
+    run_command("mkdir packages", cwd="runtime")
+    if success1 == 0:
+        print("xxxxx-----downloading corresponding arch nupkgs-----xxxxx")
+        run_command("gh release download v%s --repo IBM/dotnet-s390x --pattern \"*linux-s390x*.nupkg\"" %(global_version),cwd="packages")
+        run_command("tar -xf dotnet-sdk-%s-linux-s390x.tar.gz --directory runtime/.dotnet/" % global_version)
+    elif success2 == True:
+        print("xxxxx------Copying the nupkgs and extracting the sdk from custom-built sdk------xxxxx")
+        run_command("cp ../dotnet-custom-sdk/%s/*.nupkg packages/" %(global_version), cwd="runtime")
+        run_command("git-lfs install", cwd="dotnet-custom-sdk")
+        run_command("git-lfs pull", cwd="dotnet-custom-sdk") #need to build git-lfs from source
+        run_command("tar -xf ../dotnet-custom-sdk/%s/dotnet-sdk-*.tar.gz --directory .dotnet/" %(global_version), cwd="runtime")
+    
+    print("xxxxx-----Adding Nuget Source-----xxxxx")
+    run_command(".dotnet/dotnet nuget add source ./packages", cwd="runtime")
 
-def build_mono_runtime(repo_dir):
-    """Build the Mono runtime for s390x."""
-    print("Building the Mono runtime for s390x...")
-    run_command("./build.sh /p:UsingToolMicrosoftNetCompilers=false /p:NoPgoOptimize=true --portablebuild false /p:DotNetBuildFromSource=true /p:DotNetBuildSourceOnly=true /p:DotNetBuildTests=true --runtimeconfiguration Release --librariesConfiguration Debug /p:PrimaryRuntimeFlavor=Mono --warnAsError false /p:TargetRid=linux-s390x --subset clr+mono+libs+host+packs+libs.tests", cwd=repo_dir)
+#build and test the mono runtime
+#added a custom path to llvm due to a bug in llvm-17.0.6
+
+def build_and_test_mono_runtime(repo_dir):
+    print("xxxxx-----Building and testing Mono runtime for s390x-----xxxxx")
+    run_command("./build.sh --cmakeargs -DCMAKE_CXX_COMPILER=\"/home/sanjam/llvm-project/build/bin/clang++\" --cmakeargs -DCMAKE_C_COMPILER=\"/home/sanjam/llvm-project/build/bin/clang\" /p:UsingToolMicrosoftNetCompilers=false /p:NoPgoOptimize=true --portablebuild false /p:DotNetBuildFromSource=true /p:DotNetBuildSourceOnly=true /p:DotNetBuildTests=true --runtimeconfiguration Release --librariesConfiguration Debug /p:PrimaryRuntimeFlavor=Mono --warnAsError false /p:TargetRid=linux-s390x --subset clr+mono+libs+host+packs+libs.tests --test > log", cwd=repo_dir)
+
+def send_email_via_relay(smtp_server, smtp_port, sender_email, recipient_email, subject, body, log_file_path):
+    # Create a multipart message
+    msg = MIMEMultipart()
+    msg['From'] = sender_email
+    msg['To'] = recipient_email
+    msg['Subject'] = subject
+
+
+    # Attach the log file
+    with open(log_file_path, "rb") as attachment:
+        content = attachment.read()
+        part = MIMEBase("application", "octet-stream")
+        part.set_payload(content)
+        encoders.encode_base64(part)
+        part.add_header(
+            "Content-Disposition",
+            f"attachment; filename= runtime-log-"+datetime.now().strftime("%Y-%m-%d")+".txt",
+        )
+        msg.attach(part)
+
+    string_search = b'Build FAILED'
+
+    if string_search in content:
+        body += "\n Summary: The Build has Failed! . Please fix the errors"
+    else:
+        body += "\n Summary: The Build is Successful :)"
+
+    # Add body to email
+    msg.attach(MIMEText(body, 'plain'))
+
+    try:
+        # Connect to the SMTP server
+        with smtplib.SMTP(smtp_server, smtp_port) as server:
+            # Send the email
+            server.sendmail(sender_email, recipient_email, msg.as_string())
+            print("Email sent successfully.")
+    except Exception as e:
+        print(f"Failed to send email. Error: {str(e)}")
+
+#clean once everything is done
+
+def clean():
+    run_command("rm -rf runtime/ dotnet-custom-sdk/")
 
 def main():
     repo_url = "https://github.com/dotnet/runtime.git"
-    branch = "main"
+    branch = "release/9.0"
     repo_dir = "runtime"
 
-#    install_dependencies()
+#   install_dependencies()
     clone_repository(repo_url, branch)
-#    checkout_branch(branch, repo_dir)
     
-    validate_install_dotnet_version()
+    global_version = get_dotnet_version("runtime")
+    download_extract_sdk(global_version)
+    build_and_test_mono_runtime(repo_dir)
+
+#enter IBM's smtp relay server
+
+    smtp_server = "<redacted>"
+    smtp_port = 25
+
+    sender_email = "runtime-cronjob"
+
+#enter recipient email address
     
-    build_mono_runtime(repo_dir)
+    recipient_email = "<redacted>"
+    subject = "Log File"
+    body = "Please find the log file attached."
+    log_file_path = "runtime/log"
+
+    send_email_via_relay(smtp_server, smtp_port, sender_email, recipient_email, subject, body, log_file_path)
+
+    clean()
 
 if __name__ == "__main__":
     main()

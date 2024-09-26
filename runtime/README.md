@@ -1,3 +1,8 @@
+#dependencies
+* gh
+* git-lfs
+* toolchain to build runtime
+
 #Functionalities
 
 * clones the dotnet/runtime repo. and validates if the dotnet sdk version present in the global.json is present on the machine or not
