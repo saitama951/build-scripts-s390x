@@ -64,9 +64,22 @@ def clone_repository(repo_url, branch="main"):
     else:
         print(f"Repository already exists at {target_dir}. Skipping clone step.")
 
+def get_latest_release_tag(repo):
+    # Get the latest release tag using gh command
+    result = subprocess.run(
+        ["gh", "release", "list", "--repo", repo, "--limit", "1", "--json", "tagName", "--jq", ".[0].tagName"],
+        capture_output=True,
+        text=True
+    )
+    if result.returncode != 0:
+        raise Exception(f"Error getting latest release tag: {result.stderr}")
+    return result.stdout.strip()
+
+
 #extracts the dotnet version from the global.json
 
 def get_dotnet_version(repo_dir):
+
     global_json_path = os.path.join(repo_dir, "global.json")
     
     if not os.path.exists(global_json_path):
@@ -88,22 +101,26 @@ def get_dotnet_version(repo_dir):
 #NIT: we need a concrete solution for this.
 #NIT: git-lfs and gh needs to be installed from source for ***RHEL***
 
-def download_extract_sdk(global_version):
+def download_extract_sdk():
+    latest_tag = get_latest_release_tag("IBM/dotnet-s390x")
+
     run_command("mkdir .dotnet/", cwd="runtime")
 
-    print("xxxxx-----downloading the dotnet-sdk version %s-----xxxxx" % global_version)
-    success1 = run_command("gh release download v%s --repo IBM/dotnet-s390x --pattern \"dotnet-sdk-*.tar.gz\"" %(global_version))
-    run_command("git clone https://github.com/saitama951/dotnet-custom-sdk.git")
-    success2 = os.path.exists("./dotnet-custom-sdk/%s/" %(global_version))
-    print(success2)
+    print("xxxxx-----downloading the dotnet-sdk version %s-----xxxxx" %(latest_tag))
+    success1 = run_command("gh release download %s --repo IBM/dotnet-s390x --pattern \"dotnet-sdk-*-s390x.tar.gz\"" %(latest_tag),cwd="runtime")
+    #run_command("git clone https://github.com/saitama951/dotnet-custom-sdk.git")
+    #success2 = os.path.exists("./dotnet-custom-sdk/%s/" %(global_version))
+    success2 = False
     if success1 != 0 and success2 !=True:
         print("This sdk version is not present in the IBM/dotnet-s390x/releases please build it manually!")
         sys.exit()
     run_command("mkdir packages", cwd="runtime")
     if success1 == 0:
         print("xxxxx-----downloading corresponding arch nupkgs-----xxxxx")
-        run_command("gh release download v%s --repo IBM/dotnet-s390x --pattern \"*linux-s390x*.nupkg\"" %(global_version),cwd="packages")
-        run_command("tar -xf dotnet-sdk-%s-linux-s390x.tar.gz --directory runtime/.dotnet/" % global_version)
+        run_command("gh release download %s --repo IBM/dotnet-s390x --pattern \"*linux-s390x*.nupkg\"" %(latest_tag),cwd="runtime/packages")
+        run_command("tar -xf dotnet-sdk-*-linux-s390x.tar.gz --directory .dotnet/", cwd="runtime")
+
+#we don't use this logic, might be useful in the future
     elif success2 == True:
         print("xxxxx------Copying the nupkgs and extracting the sdk from custom-built sdk------xxxxx")
         run_command("cp ../dotnet-custom-sdk/%s/*.nupkg packages/" %(global_version), cwd="runtime")
@@ -113,6 +130,14 @@ def download_extract_sdk(global_version):
     
     print("xxxxx-----Adding Nuget Source-----xxxxx")
     run_command(".dotnet/dotnet nuget add source ./packages", cwd="runtime")
+
+    #update global.json
+    latest_tag = latest_tag[1:]
+
+    run_command("echo $(jq '.sdk.version = \"%s\" | .tools.dotnet = \"%s\"' global.json)  > global.json" %(latest_tag, latest_tag), cwd="runtime")
+
+    return latest_tag
+
 
 #build and test the mono runtime
 #added a custom path to llvm due to a bug in llvm-17.0.6
@@ -174,7 +199,7 @@ def main():
     clone_repository(repo_url, branch)
     
     global_version = get_dotnet_version("runtime")
-    download_extract_sdk(global_version)
+    latest_tag = download_extract_sdk()
     build_and_test_mono_runtime(repo_dir)
 
 #enter IBM's smtp relay server
@@ -187,8 +212,8 @@ def main():
 #enter recipient email address
     
     recipient_email = "<redacted>"
-    subject = "Log File"
-    body = "Please find the log file attached."
+    subject = "RUN  "+ datetime.now().strftime("%Y-%m-%d")
+    body = "Please find the log file attached.\n SDK_GLOBAL_JSON_VERSION = {} \n SDK_RELEASE_VERSION = {}".format(global_version,latest_tag)
     log_file_path = "runtime/log"
 
     send_email_via_relay(smtp_server, smtp_port, sender_email, recipient_email, subject, body, log_file_path)
