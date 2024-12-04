@@ -120,7 +120,7 @@ def main():
     repo_url = "https://github.com/dotnet/dotnet.git"
     repo_dir = "dotnet"
   
-  try:
+    try:
         branch = sys.argv[2]
     except IndexError:
         branch = "main"
