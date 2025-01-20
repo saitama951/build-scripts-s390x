@@ -1,0 +1,6 @@
+set smtp_url = "smtp://<redacted>"
+set ssl_force_tls = yes # Require encrypted connection
+set editor = "vim"      # Set your favourite editor.
+set edit_headers = yes  # See the headers when editing
+set charset = UTF-8     # value of $LANG; also fallback for charset
+set from = "runtime-cronjob"
