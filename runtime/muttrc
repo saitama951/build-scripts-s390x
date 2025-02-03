@@ -4,3 +4,4 @@ set editor = "vim"      # Set your favourite editor.
 set edit_headers = yes  # See the headers when editing
 set charset = UTF-8     # value of $LANG; also fallback for charset
 set from = "runtime-cronjob"
+set content_type=text/html
