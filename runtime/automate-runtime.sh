@@ -2,7 +2,7 @@ set -x
 
 BASEDIR=$(pwd)
 message=()
-version=""1
+version=""
 commit_id=""
 function clone_runtime {
 	git clone --branch ${1:-main} https://github.com/dotnet/runtime
