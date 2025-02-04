@@ -24,6 +24,7 @@ function extract_sdk {
 		gh release download v${version} --repo IBM/dotnet-s390x --pattern dotnet-sdk-${version}-linux-s390x.tar.gz
 		if [ $? -ne 0 ]; then
 			message+=("failed to get the dotnet host SDK.<br>please build the sdk with version ${version}")
+   			popd
 			eval $(shoot_email)
 			exit 1
 		fi
@@ -66,7 +67,7 @@ function build_runtime {
 }
 
 function shoot_email {
-	#pushd runtime
+	pushd runtime
 	recipents_emails=(
 	)
 	file=$(mktemp)
@@ -78,7 +79,7 @@ function shoot_email {
 		mutt -s "RUN ${timestamp}" -a "log" -- "${recipents_emails[@]}" < file
 	fi
 	rm -rf file
-	#popd
+	popd
 }
 
 run=(clone_runtime extract_sdk build_runtime shoot_email)
