@@ -20,11 +20,12 @@ function clone_dotnet {
 
 function install_cross_rootfs {
 	pushd dotnet/src/runtime/eng/common/cross
-	./build-rootfs.sh s390x --rootfsdir ${BASEDIR}/s390x-rootfs
+	sudo ./build-rootfs.sh s390x --rootfsdir ${BASEDIR}/s390x-rootfs
 	popd
 }
 
 function build_dotnet {
+    pushd dotnet
 	dotnet_build_flags=(
 		--source-only 
 		--online 
@@ -34,6 +35,7 @@ function build_dotnet {
         )
 	./prep-source-build.sh
 	./build.sh "${dotnet_build_flags[@]}"
+    popd
 }
 
 run=(clone_dotnet install_cross_rootfs build_dotnet)
