@@ -1,6 +1,7 @@
+#Pre-requisites
+* make sure user is part of sudo group (needed to install packages)
+* make sure cross-arch toolchain is installed.
+
 # how to run
-
-* use --branch to checkout a specific branch
-* please run this file from /root/
-
-i.e python3 src-build.py --branch "release/9.0.1xx"
+* ./automate-dotnet.sh <branch>
+* default: main
