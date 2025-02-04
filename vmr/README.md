@@ -3,5 +3,5 @@
 * make sure cross-arch toolchain is installed.
 
 # how to run
-* ./automate-dotnet.sh <branch>
+* ./automate-dotnet.sh {branch}
 * default: main
